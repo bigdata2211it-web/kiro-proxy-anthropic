@@ -1,0 +1,30 @@
+{
+  "name": "kiro-proxy-anthropic",
+  "version": "0.1.0",
+  "description": "Anthropic Messages API compatible local proxy for Kiro CLI (Amazon CodeWhisperer) — drop-in replacement for Anthropic API with free Kiro-backed Claude models",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.0.0"
+  },
+  "keywords": [
+    "kiro",
+    "codewhisperer",
+    "anthropic",
+    "anthropic-api",
+    "claude-code",
+    "proxy",
+    "claude",
+    "opus",
+    "sonnet",
+    "amazon-q",
+    "messages-api"
+  ],
+  "license": "MIT",
+  "repository": {"type": "git", "url": "https://github.com/bigdata2211it-web/kiro-proxy-anthropic.git"},
+  "homepage": "https://github.com/bigdata2211it-web/kiro-proxy-anthropic",
+  "bugs": "https://github.com/bigdata2211it-web/kiro-proxy-anthropic/issues",
+  "engines": {"node": ">=18"}
+}
