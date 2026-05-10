@@ -11,7 +11,13 @@ const Database = require("better-sqlite3");
 
 const PORT = parseInt(process.env.KIRO_PROXY_PORT || "11437");
 const HOST = "q.us-east-1.amazonaws.com";
-const DB_PATH = path.join(process.env.HOME, ".local/share/kiro-cli/data.sqlite3");
+const DB_PATH = process.env.KIRO_DB_PATH || (() => {
+  const home = process.env.HOME || process.env.USERPROFILE || "";
+  if (process.platform === "win32") {
+    return path.join(process.env.APPDATA || path.join(home, "AppData", "Roaming"), "kiro-cli", "data.sqlite3");
+  }
+  return path.join(home, ".local", "share", "kiro-cli", "data.sqlite3");
+})();
 
 // ─────────────────────────────────────────────────────────────
 // Token from Kiro sqlite
@@ -122,6 +128,29 @@ function flattenAnthropicContent(content) {
 
 function tryParseJson(s) { try { return JSON.parse(s); } catch { return { result: s }; } }
 
+// CodeWhisperer требует, чтобы toolUseId начинался с "tooluse_"
+function normalizeToolUseId(id) {
+  if (!id) return `tooluse_${crypto.randomBytes(10).toString("hex")}`;
+  if (id.startsWith("tooluse_")) return id;
+  const stripped = id.replace(/^(toolu_|call_|tool_)/, "");
+  return `tooluse_${stripped}`;
+}
+
+function lastAssistantToolIds(history) {
+  for (let i = history.length - 1; i >= 0; i--) {
+    const h = history[i];
+    if (h.assistantResponseMessage?.toolUses?.length) {
+      return new Set(h.assistantResponseMessage.toolUses.map(t => t.toolUseId));
+    }
+    if (h.assistantResponseMessage) break;
+  }
+  return new Set();
+}
+
+function filterOrphanToolResults(results, validIds) {
+  return results.filter(r => validIds.has(r.toolUseId));
+}
+
 // ─────────────────────────────────────────────────────────────
 // Anthropic → Kiro conversion
 // ─────────────────────────────────────────────────────────────
@@ -154,17 +183,26 @@ function anthropicToKiro(body) {
     const { text, toolUses, toolResults } = flattenAnthropicContent(msg.content);
 
     if (msg.role === "user") {
-      // Flush pending assistant if any
+      // Flush pending assistant + tool results as a pair
       if (pendingAssistantMessage) {
         history.push({ assistantResponseMessage: pendingAssistantMessage });
         pendingAssistantMessage = null;
       }
+      if (pendingToolResults.length) {
+        const validIds = lastAssistantToolIds(history);
+        const kept = filterOrphanToolResults(pendingToolResults, validIds);
+        if (kept.length) {
+          history.push({ userInputMessage: { content: "", userInputMessageContext: { toolResults: kept }, origin: "KIRO_CLI", modelId: model } });
+        }
+        pendingToolResults = [];
+      }
+      // Flush any pending user message
+      if (pendingUserMessage) { history.push({ userInputMessage: pendingUserMessage }); pendingUserMessage = null; }
 
       if (toolResults.length) {
-        // Tool results — accumulate for current message
         for (const tr of toolResults) {
           pendingToolResults.push({
-            toolUseId: tr.tool_use_id,
+            toolUseId: normalizeToolUseId(tr.tool_use_id),
             content: [{ json: tryParseJson(tr.content) }],
             status: tr.is_error ? "error" : "success"
           });
@@ -174,22 +212,39 @@ function anthropicToKiro(body) {
       if (text) {
         pendingUserMessage = { content: text, userInputMessageContext: {}, origin: "KIRO_CLI", modelId: model };
       } else if (toolResults.length && !pendingUserMessage) {
-        // Tool-results-only user message
         pendingUserMessage = { content: "", userInputMessageContext: {}, origin: "KIRO_CLI", modelId: model };
       }
     } else if (msg.role === "assistant") {
-      // Flush pending user if any
-      if (pendingUserMessage) {
+      // Flush pending assistant + tool results as a pair, then pending user
+      if (pendingAssistantMessage) {
+        history.push({ assistantResponseMessage: pendingAssistantMessage });
+        pendingAssistantMessage = null;
+      }
+      if (pendingToolResults.length) {
+        const validIds = lastAssistantToolIds(history);
+        const kept = filterOrphanToolResults(pendingToolResults, validIds);
+        if (kept.length) {
+          history.push({ userInputMessage: { content: pendingUserMessage ? pendingUserMessage.content : "", userInputMessageContext: { toolResults: kept }, origin: "KIRO_CLI", modelId: model } });
+        } else if (pendingUserMessage && pendingUserMessage.content) {
+          history.push({ userInputMessage: { ...pendingUserMessage } });
+        }
+        pendingToolResults = [];
+        pendingUserMessage = null;
+      } else if (pendingUserMessage) {
         history.push({ userInputMessage: pendingUserMessage });
         pendingUserMessage = null;
       }
-      const assistantMsg = { content: text };
+      const assistantMsg = { messageId: crypto.randomUUID(), content: text };
       if (toolUses.length) {
         assistantMsg.toolUses = toolUses.map(tu => ({
-          toolUseId: tu.id,
+          toolUseId: normalizeToolUseId(tu.id),
           name: tu.name,
           input: tu.input
         }));
+      }
+      // Не пушим пустого ассистента
+      if (!assistantMsg.content && !assistantMsg.toolUses) {
+        assistantMsg.content = ".";
       }
       pendingAssistantMessage = assistantMsg;
     }
@@ -204,15 +259,20 @@ function anthropicToKiro(body) {
   // Build currentMessage from last user message
   const userContext = { envState: { operatingSystem: "linux", currentWorkingDirectory: process.cwd() } };
   if (kiroTools.length) userContext.tools = kiroTools;
-  if (pendingToolResults.length) userContext.toolResults = pendingToolResults;
+  if (pendingToolResults.length) {
+    const validIds = lastAssistantToolIds(history);
+    const kept = filterOrphanToolResults(pendingToolResults, validIds);
+    if (kept.length) userContext.toolResults = kept;
+    else pendingToolResults = []; // сброс сирот
+  }
 
   let currentMessage;
   if (pendingUserMessage) {
     let content = pendingUserMessage.content;
     if (systemPrompt && history.length === 0) {
-      // Prepend system only on first user turn (Kiro uses content for both system+user)
       content = systemPrompt + "\n\n" + content;
     }
+    if (!content) content = userContext.toolResults ? "continue" : "."; // Kiro требует непустой content
     currentMessage = {
       userInputMessage: {
         content,
@@ -224,7 +284,7 @@ function anthropicToKiro(body) {
   } else if (pendingToolResults.length) {
     currentMessage = {
       userInputMessage: {
-        content: "",
+        content: "continue",
         userInputMessageContext: userContext,
         origin: "KIRO_CLI",
         modelId: model
@@ -233,7 +293,7 @@ function anthropicToKiro(body) {
   } else {
     currentMessage = {
       userInputMessage: {
-        content: systemPrompt,
+        content: systemPrompt || ".",
         userInputMessageContext: userContext,
         origin: "KIRO_CLI",
         modelId: model
@@ -319,6 +379,14 @@ const server = http.createServer((req, res) => {
           proxyRes.on("data", d => err += d);
           proxyRes.on("end", () => {
             console.error(`[KIRO] ${proxyRes.statusCode}: ${err.slice(0, 300)}`);
+            if (proxyRes.statusCode === 400) {
+              try {
+                const fs = require("fs");
+                const dumpPath = `/tmp/kiro-proxy-anthropic-400-${Date.now()}.json`;
+                fs.writeFileSync(dumpPath, JSON.stringify({ incoming: parsed, outgoing: kiroReq, err }, null, 2));
+                console.error(`[KIRO] 400 dump -> ${dumpPath}`);
+              } catch (e) { console.error("[KIRO] dump fail:", e.message); }
+            }
             res.writeHead(proxyRes.statusCode, { "Content-Type": "application/json" });
             res.end(JSON.stringify({
               type: "error",
