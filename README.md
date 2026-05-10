@@ -45,6 +45,11 @@ Also accepts Anthropic-style dated IDs (`claude-sonnet-4-5-20250514`, `claude-op
 
 - Node.js 18+
 - Kiro CLI logged in (`kiro-cli login`). Get it from [kiro.dev](https://kiro.dev).
+- **Linux, macOS, Windows** — all supported. Kiro SQLite path is auto-detected:
+  - Linux: `$XDG_DATA_HOME/kiro-cli/data.sqlite3` or `~/.local/share/kiro-cli/data.sqlite3`
+  - macOS: `~/.local/share/kiro-cli/data.sqlite3`
+  - Windows: `%APPDATA%\kiro-cli\data.sqlite3`
+  - Override with `KIRO_DB_PATH`.
 
 ## Install
 
@@ -52,7 +57,28 @@ Also accepts Anthropic-style dated IDs (`claude-sonnet-4-5-20250514`, `claude-op
 git clone https://github.com/bigdata2211it-web/kiro-proxy-anthropic.git
 cd kiro-proxy-anthropic
 npm install
+```
+
+## Run
+
+### Linux / macOS
+
+```bash
+./start.sh
+# or
 node index.js
+```
+
+### Windows
+
+```powershell
+# PowerShell
+.\start.ps1
+```
+
+```cmd
+:: cmd.exe
+start.cmd
 ```
 
 Listens on `http://127.0.0.1:11437` (override with `KIRO_PROXY_PORT`).
@@ -204,6 +230,14 @@ Run both simultaneously if you need both APIs.
 - **Extended thinking** (Opus 4.7 adaptive thinking): not exposed as `thinking` blocks
 - **Rate limits**: whatever Kiro's credit pool allows
 - **Prompt caching blocks** (`cache_control`): accepted but not propagated (Kiro has its own server-side caching)
+
+## Environment variables
+
+| Name | Default | Description |
+|---|---|---|
+| `KIRO_PROXY_PORT` | `11437` | Listen port. |
+| `KIRO_DB_PATH` | auto | Override path to Kiro CLI SQLite DB. |
+| `KIRO_DUMP_DIR` | `os.tmpdir()` | Where 400-error debug dumps are written. |
 
 ## License
 

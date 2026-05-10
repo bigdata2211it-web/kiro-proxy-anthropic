@@ -1,23 +1,39 @@
 // kiro-proxy-anthropic: Anthropic Messages API compatible proxy for Kiro (CodeWhisperer)
 // Endpoint: POST /v1/messages
 // Auth: x-api-key header OR Authorization: Bearer (any value, we don't check)
-// Token source: ~/.local/share/kiro-cli/data.sqlite3 (auth_kv table)
+// Token source: Kiro CLI local SQLite (cross-platform path detection)
 
 const http = require("http");
 const https = require("https");
 const crypto = require("crypto");
 const path = require("path");
+const os = require("os");
 const Database = require("better-sqlite3");
 
 const PORT = parseInt(process.env.KIRO_PROXY_PORT || "11437");
 const HOST = "q.us-east-1.amazonaws.com";
 const DB_PATH = process.env.KIRO_DB_PATH || (() => {
-  const home = process.env.HOME || process.env.USERPROFILE || "";
+  const home = process.env.HOME || process.env.USERPROFILE || os.homedir();
   if (process.platform === "win32") {
     return path.join(process.env.APPDATA || path.join(home, "AppData", "Roaming"), "kiro-cli", "data.sqlite3");
   }
-  return path.join(home, ".local", "share", "kiro-cli", "data.sqlite3");
+  if (process.platform === "darwin") {
+    const xdg = process.env.XDG_DATA_HOME || path.join(home, ".local", "share");
+    return path.join(xdg, "kiro-cli", "data.sqlite3");
+  }
+  const xdg = process.env.XDG_DATA_HOME || path.join(home, ".local", "share");
+  return path.join(xdg, "kiro-cli", "data.sqlite3");
 })();
+
+// Cross-platform OS identifier for Kiro envState
+function kiroOsName() {
+  if (process.platform === "win32") return "windows";
+  if (process.platform === "darwin") return "mac";
+  return "linux";
+}
+
+// Cross-platform temp dir for 400-dump artifacts
+const DUMP_DIR = process.env.KIRO_DUMP_DIR || os.tmpdir();
 
 // ─────────────────────────────────────────────────────────────
 // Token from Kiro sqlite
@@ -257,7 +273,7 @@ function anthropicToKiro(body) {
   }
 
   // Build currentMessage from last user message
-  const userContext = { envState: { operatingSystem: "linux", currentWorkingDirectory: process.cwd() } };
+  const userContext = { envState: { operatingSystem: kiroOsName(), currentWorkingDirectory: process.cwd() } };
   if (kiroTools.length) userContext.tools = kiroTools;
   if (pendingToolResults.length) {
     const validIds = lastAssistantToolIds(history);
@@ -382,7 +398,7 @@ const server = http.createServer((req, res) => {
             if (proxyRes.statusCode === 400) {
               try {
                 const fs = require("fs");
-                const dumpPath = `/tmp/kiro-proxy-anthropic-400-${Date.now()}.json`;
+                const dumpPath = path.join(DUMP_DIR, `kiro-proxy-anthropic-400-${Date.now()}.json`);
                 fs.writeFileSync(dumpPath, JSON.stringify({ incoming: parsed, outgoing: kiroReq, err }, null, 2));
                 console.error(`[KIRO] 400 dump -> ${dumpPath}`);
               } catch (e) { console.error("[KIRO] dump fail:", e.message); }
