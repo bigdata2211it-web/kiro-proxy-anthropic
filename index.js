@@ -278,7 +278,7 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  if (req.url === "/v1/messages" && req.method === "POST") {
+  if (req.url.startsWith("/v1/messages") && req.method === "POST") {
     let raw = "";
     req.on("data", c => raw += c);
     req.on("end", () => {
