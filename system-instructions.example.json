@@ -1,0 +1,34 @@
+{
+  "_comment_1": "Copy this file to system-instructions.json and edit to your needs.",
+  "_comment_2": "The proxy looks for the real config at (first match wins):",
+  "_comment_3": "  1. $KIRO_PROXY_INSTRUCTIONS_CONFIG",
+  "_comment_4": "  2. $XDG_CONFIG_HOME/kiro-proxy-anthropic/system-instructions.json",
+  "_comment_5": "  3. $XDG_CONFIG_HOME/kiro-proxy/system-instructions.json  (shared with the OpenAI sibling)",
+  "_comment_6": "  4. ~/.config/kiro-proxy-anthropic/system-instructions.json",
+  "_comment_7": "  5. ~/.config/kiro-proxy/system-instructions.json",
+  "_comment_8": "  6. ./system-instructions.json (next to index.js)",
+
+  "enabled": true,
+
+  "_mode_values": "prepend | append | replace | off",
+  "_mode_meaning": "prepend = your rules before client system; append = after; replace = only yours; off = passthrough",
+  "mode": "prepend",
+
+  "_strict_meaning": "false = warn and skip missing files; true = throw error on any missing required file",
+  "strict": false,
+
+  "cache_ttl_seconds": 300,
+
+  "files": [
+    { "path": "examples/minimal/assistant.md", "required": true },
+    { "path": "examples/coding/rules.md", "required": false }
+  ],
+
+  "wrapper": {
+    "_comment": "Optional. Leave empty strings to just concatenate files.",
+    "open": "",
+    "close": "",
+    "file_separator": "\n\n",
+    "file_header_template": ""
+  }
+}

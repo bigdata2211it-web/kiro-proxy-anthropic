@@ -9,6 +9,7 @@ const path = require("path");
 const os = require("os");
 const fs = require("fs");
 const Database = require("better-sqlite3");
+const systemInstructions = require("./system-instructions");
 
 const PORT = parseInt(process.env.KIRO_PROXY_PORT || "11437");
 const HOST = "q.us-east-1.amazonaws.com";
@@ -202,13 +203,15 @@ function filterOrphanToolResults(results, validIds) {
 // ─────────────────────────────────────────────────────────────
 // Anthropic → Kiro conversion
 // ─────────────────────────────────────────────────────────────
-function anthropicToKiro(body, overrideModel) {
+function anthropicToKiro(body, overrideModel, instructionsHeader) {
   const { messages, tools: anthropicTools, system } = body;
   const model = overrideModel || normalizeModel(body.model);
 
   let systemPrompt = "";
   if (typeof system === "string") systemPrompt = system;
   else if (Array.isArray(system)) systemPrompt = system.map(s => s.type === "text" ? s.text : "").join("\n");
+  // Apply extra system instructions (loaded from files if configured).
+  systemPrompt = systemInstructions.apply(systemPrompt, instructionsHeader);
 
   const kiroTools = (anthropicTools || []).map(t => ({
     toolSpecification: { name: t.name, description: t.description || "", inputSchema: { json: t.input_schema || { type: "object", properties: {} } } }
@@ -299,7 +302,7 @@ function kiroAttempt(body, tokenData) {
 }
 
 // Retry + fallback loop. Returns { ok, proxyRes, usedModel } or { ok:false, statusCode, body, usedModel }
-async function sendWithRetry(parsed, tokenData) {
+async function sendWithRetry(parsed, tokenData, instructionsHeader) {
   const requestedModel = normalizeModel(parsed.model);
   const chain = fallbackFor(requestedModel);
   let lastErr = null;
@@ -309,7 +312,7 @@ async function sendWithRetry(parsed, tokenData) {
     let capacityStrikes = 0;
 
     for (let attempt = 0; attempt < RETRY_MAX; attempt++) {
-      const kiroReq = anthropicToKiro(parsed, tryModel);
+      const kiroReq = anthropicToKiro(parsed, tryModel, instructionsHeader);
       kiroReq.profileArn = tokenData.profile_arn;
       const bodyStr = JSON.stringify(kiroReq);
 
@@ -358,6 +361,18 @@ const server = http.createServer((req, res) => {
   if (req.method === "OPTIONS") { res.writeHead(200); res.end(); return; }
   if (req.url === "/health") { res.writeHead(200); res.end("ok"); return; }
 
+  if (req.url === "/debug/instructions" && req.method === "GET") {
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify(systemInstructions.status(), null, 2));
+    return;
+  }
+  if (req.url === "/debug/instructions/reload" && req.method === "POST") {
+    systemInstructions.reload();
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify(systemInstructions.status(), null, 2));
+    return;
+  }
+
   if (req.url === "/v1/models" && req.method === "GET") {
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ data: [...VALID_MODELS].map(id => ({ type: "model", id, display_name: id, created_at: new Date().toISOString() })), has_more: false }));
@@ -382,7 +397,7 @@ const server = http.createServer((req, res) => {
         return;
       }
 
-      const result = await sendWithRetry(parsed, tokenData);
+      const result = await sendWithRetry(parsed, tokenData, req.headers["x-proxy-instructions"]);
       const model = result.usedModel || normalizeModel(parsed.model);
       const msgId = `msg_${crypto.randomBytes(12).toString("hex")}`;
 

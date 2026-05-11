@@ -4,3 +4,9 @@ node_modules/
 .env.*
 .DS_Store
 kiro-proxy-anthropic.log
+
+# Real system-instructions config (private). Only the *.example.json is tracked.
+system-instructions.json
+/config/system-instructions.json
+/instructions/
+/private/
