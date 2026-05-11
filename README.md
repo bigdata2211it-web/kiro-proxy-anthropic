@@ -14,6 +14,33 @@ Drop-in replacement for the Anthropic API — any client that normally talks to 
 
 There's also a sibling OpenAI-compatible version: [kiro-proxy](https://github.com/bigdata2211it-web/kiro-proxy).
 
+## Quick install (Anthropic-compatible)
+
+One-liner, no git clone needed.
+
+**Linux / macOS**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/bigdata2211it-web/kiro-proxy-anthropic/main/install/install.sh | bash
+```
+
+**Windows (PowerShell)**
+
+```powershell
+iwr -useb https://raw.githubusercontent.com/bigdata2211it-web/kiro-proxy-anthropic/main/install/install.ps1 | iex
+```
+
+The installer:
+- checks Node 18+ (prints install hint if missing),
+- clones the repo to a sensible OS-specific location,
+- runs `npm install --omit=dev`,
+- registers autostart (systemd user unit on Linux, LaunchAgent on macOS, Scheduled Task on Windows),
+- smoke-tests `http://127.0.0.1:11437`.
+
+Details, environment overrides, uninstall: see [install/README.md](install/README.md).
+
+---
+
 ## Features
 
 - ✅ `POST /v1/messages` — full Anthropic Messages API (streaming + non-streaming)
